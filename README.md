@@ -6,7 +6,7 @@ Bulk Bing Image Downloader
 - is crossplatform
 - bypasses bing API
 - has option to disable adult content filtering
-- is written in python 3.
+- ported from the original python 3 to python 2 (also from urllib to requests module)
 - uses SSL connection
 
 ### Usage
@@ -16,3 +16,5 @@ chmod +x bbid.py
 ```
 ### Example
 `./bbid.py -s earth`
+
+### Optional Config file to specify file extensions to include.

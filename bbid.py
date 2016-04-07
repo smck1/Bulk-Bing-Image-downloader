@@ -1,5 +1,10 @@
-#!/usr/bin/env python3
-import os, sys, urllib.request, re, threading, posixpath, urllib.parse, argparse, atexit, random, socket, time, hashlib, pickle, signal, subprocess
+#!/usr/bin/env python2
+import os, sys, requests, urlparse, shutil, re, threading, posixpath, argparse, atexit, random, socket, time, hashlib, pickle, signal, subprocess
+try:
+	import config
+except ImportError:
+	config = None
+
 
 #config
 output_dir = './bing' #default output dir
@@ -13,27 +18,39 @@ tried_urls = []
 finished_keywords=[]
 failed_urls = []
 urlopenheader={ 'User-Agent' : 'Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:42.0) Gecko/20100101 Firefox/42.0'}
+
 def download(url,output_dir,retry=False):
 	global tried_urls, failed_urls
 	url_hash=hashlib.sha224(url.encode('utf-8')).digest()
 	if url_hash in tried_urls:
 		return
-	pool_sema.acquire() 
-	path = urllib.parse.urlsplit(url).path
+	path = urlparse.urlparse(url).path
+	# Check for file extension
+	if config:
+		if config.extensions:
+			ext = os.path.splitext(path)[1].lower()
+			if ext not in config.extensions:
+				failed_urls.append((url, output_dir))
+				#print 'Ignored file: {}'.format(ext)
+				return -1
 	filename = posixpath.basename(path)
+	pool_sema.acquire()
 	if len(filename)>40:
 		filename=filename[:36]+filename[-4:]
 	while os.path.exists(output_dir + '/' + filename):
 		filename = str(random.randint(0,100)) + filename
 	in_progress.append(filename)
 	try:
-		request=urllib.request.Request(url,None,urlopenheader)
-		image=urllib.request.urlopen(request).read()
-		if len(image)==0:
-			print('no image')
-		imagefile=open(output_dir + '/' + filename,'wb')
-		imagefile.write(image)
-		imagefile.close()
+		#request=urllib.request.Request(url,None,urlopenheader)
+		#image=urllib.request.urlopen(request).read()
+		response = requests.get(url, headers=urlopenheader)
+		if response.status_code == 200:
+			fpath = output_dir + '/' + filename
+			with open(fpath, 'wb+') as f:
+				for chunk in response.iter_content():
+					f.write(chunk)
+		else:
+			raise Exception('Bad Reuqest: {} \n{}'.format(response.status_code, response.reason))
 		in_progress.remove(filename)
 		if retry:
 			print('Retry OK '+ filename)
@@ -41,6 +58,7 @@ def download(url,output_dir,retry=False):
 			print("OK " + filename)
 		tried_urls.append(url_hash)
 	except Exception as e:
+		print e
 		if retry:
 			print('Retry Fail ' + filename)
 		else:
@@ -59,10 +77,11 @@ def fetch_images_from_keyword(keyword,output_dir):
 	current = 1
 	last = ''
 	while True:
-		request_url='https://www.bing.com/images/async?q=' + urllib.parse.quote_plus(keyword) + '&async=content&first=' + str(current) + '&adlt=' + adlt
-		request=urllib.request.Request(request_url,None,headers=urlopenheader)
-		response=urllib.request.urlopen(request)
-		html = response.read().decode('utf8')
+		params = {'q': 'keyword', 'async':'content', 'first': str(current), 'adlt':adlt}
+		request_url = 'https://www.bing.com/images/async'
+		#request_url='https://www.bing.com/images/async?q=' + parse_quote_plus(keyword) + '&async=content&first=' + str(current) + '&adlt=' + adlt
+		response=requests.get(request_url, params=params, headers=urlopenheader)
+		html = response.text
 		links = re.findall('imgurl:&quot;(.*?)&quot;',html)
 		try:
 			if links[-1] == last:
@@ -71,6 +90,7 @@ def fetch_images_from_keyword(keyword,output_dir):
 			current += bingcount
 			for link in links:
 				t = threading.Thread(target = download,args = (link,output_dir))
+				t.daemon = True
 				t.start()
 		except IndexError:
 			print('No search results for "{0}"'.format(keyword))
@@ -86,13 +106,14 @@ def backup_history(*args):
 	print('history_dumped')
 	if args:
 		exit(0)
-	
+
 if __name__ == "__main__":
 	atexit.register(removeNotFinished)
 	parser = argparse.ArgumentParser(description = 'Bing image bulk downloader')
 	parser.add_argument('-s', '--search-string', help = 'Keyword to search', required = False)
 	parser.add_argument('-f', '--search-file', help = 'Path to a file containing search strings line by line', required = False)
 	parser.add_argument('-o', '--output', help = 'Output directory', required = False)
+	parser.add_argument('-e', '--ext', help = 'File Extentions', required = False)
 	parser.add_argument('--filter', help = 'Enable adult filter', action = 'store_true', required = False)
 	parser.add_argument('--no-filter', help=  'Disable adult filter', action = 'store_true', required = False)
 	args = parser.parse_args()
@@ -119,6 +140,8 @@ if __name__ == "__main__":
 		adlt = 'off'
 	elif args.filter:
 		adlt = ''
+	if args.ext:
+		print args.ext
 	if args.search_string:
 		keyword = args.search_string
 		fetch_images_from_keyword(args.search_string,output_dir)
