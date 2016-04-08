@@ -1,5 +1,5 @@
 #!/usr/bin/env python2
-import os, sys, requests, urlparse, shutil, re, threading, posixpath, argparse, atexit, random, socket, time, hashlib, pickle, signal, subprocess
+import os, logging, sys, requests, urlparse, shutil, re, threading, posixpath, argparse, atexit, random, socket, time, hashlib, pickle, signal, subprocess
 try:
 	import config
 except ImportError:
@@ -15,12 +15,17 @@ socket.setdefaulttimeout(2)
 
 in_progress = []
 tried_urls = []
-finished_keywords=[]
+finished_keywords = []
 failed_urls = []
 urlopenheader={ 'User-Agent' : 'Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:42.0) Gecko/20100101 Firefox/42.0'}
 
+# Logging
+FORMAT = '%(asctime)-15s %(message)s'
+logging.basicConfig(level=logging.WARNING, format=FORMAT)
+
+
 def download(url,output_dir,retry=False):
-	global tried_urls, failed_urls
+	global tried_urls, failed_urls, successful_urls
 	url_hash=hashlib.sha224(url.encode('utf-8')).digest()
 	if url_hash in tried_urls:
 		return
@@ -61,23 +66,26 @@ def download(url,output_dir,retry=False):
 		print e
 		if retry:
 			print('Retry Fail ' + filename)
+			logging.info('Retry Failed: {}'.format(url))
 		else:
 			print("FAIL " + filename)
+			logging.warning('Failed: {}'.format(url))
 			failed_urls.append((url, output_dir))
+	logging.warning('Success: {}'.format(url))
 	pool_sema.release()
 
 def removeNotFinished():
 	for filename in in_progress:
 		try:
 			os.remove(output_dir + '/' + filename)
-		except FileNotFoundError:
+		except:
 			pass
 
 def fetch_images_from_keyword(keyword,output_dir):
 	current = 1
 	last = ''
 	while True:
-		params = {'q': 'keyword', 'async':'content', 'first': str(current), 'adlt':adlt}
+		params = {'q': keyword, 'async':'content', 'first': str(current), 'adlt':adlt}
 		request_url = 'https://www.bing.com/images/async'
 		#request_url='https://www.bing.com/images/async?q=' + parse_quote_plus(keyword) + '&async=content&first=' + str(current) + '&adlt=' + adlt
 		response=requests.get(request_url, params=params, headers=urlopenheader)
@@ -90,7 +98,7 @@ def fetch_images_from_keyword(keyword,output_dir):
 			current += bingcount
 			for link in links:
 				t = threading.Thread(target = download,args = (link,output_dir))
-				t.daemon = True
+				#t.daemon = True
 				t.start()
 		except IndexError:
 			print('No search results for "{0}"'.format(keyword))
@@ -125,6 +133,9 @@ if __name__ == "__main__":
 		os.makedirs(output_dir)
 	output_dir_origin = output_dir
 	signal.signal(signal.SIGINT, backup_history)
+	file_handler = logging.FileHandler(output_dir + os.sep + 'urls.log')
+	file_handler.setFormatter(logging.Formatter(FORMAT))
+	logging.getLogger().addHandler(file_handler)
 	try:
 		download_history=open(output_dir + '/download_history.pickle','rb')
 		tried_urls=pickle.load(download_history)
@@ -163,6 +174,7 @@ if __name__ == "__main__":
 				finished_keywords.append(keyword_hash)
 				for failed_url in failed_urls:
 					t = threading.Thread(target = download,args = (failed_url[0],failed_url[1],True))
+					#t.daemon=True
 					t.start()
 				failed_urls=[]
 			backup_history()
