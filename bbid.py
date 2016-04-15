@@ -17,6 +17,7 @@ in_progress = []
 tried_urls = []
 finished_keywords = []
 failed_urls = []
+domainhits = {}
 urlopenheader={ 'User-Agent' : 'Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:42.0) Gecko/20100101 Firefox/42.0'}
 
 # Logging
@@ -29,9 +30,19 @@ def download(url,output_dir,retry=False):
 	url_hash=hashlib.sha224(url.encode('utf-8')).digest()
 	if url_hash in tried_urls:
 		return
-	path = urlparse.urlparse(url).path
-	# Check for file extension
+	urlbits = urlparse.urlparse(url)
+	path = urlbits.path
+	domain = urlbits.netloc
+
+	# Check for file extension and domain counter
 	if config:
+		if config.domainlimit:
+			count = domainhits.get(domain)
+			if count and count >=config.domainlimit:
+				#print("Domain limit reached " + domain)
+				failed_urls.append((url, output_dir))
+				#logging.warning('"Domain limit reached: {}'.format(domain))
+				return -1
 		if config.extensions:
 			ext = os.path.splitext(path)[1].lower()
 			if ext not in config.extensions:
@@ -48,7 +59,7 @@ def download(url,output_dir,retry=False):
 	try:
 		#request=urllib.request.Request(url,None,urlopenheader)
 		#image=urllib.request.urlopen(request).read()
-		response = requests.get(url, headers=urlopenheader)
+		response = requests.get(url, headers=urlopenheader, timeout=5)
 		if response.status_code == 200:
 			fpath = output_dir + '/' + filename
 			with open(fpath, 'wb+') as f:
@@ -72,6 +83,7 @@ def download(url,output_dir,retry=False):
 			logging.warning('Failed: {}'.format(url))
 			failed_urls.append((url, output_dir))
 	logging.warning('Success: {}'.format(url))
+	domainhits[domain] = domainhits.get(domain, 0) + 1
 	pool_sema.release()
 
 def removeNotFinished():
@@ -110,6 +122,7 @@ def backup_history(*args):
 	download_history=open(output_dir + '/download_history.pickle','wb')
 	pickle.dump(tried_urls,download_history)
 	pickle.dump(finished_keywords, download_history)
+	pickle.dump(domainhits, download_history)
 	download_history.close()
 	print('history_dumped')
 	if args:
@@ -121,7 +134,7 @@ if __name__ == "__main__":
 	parser.add_argument('-s', '--search-string', help = 'Keyword to search', required = False)
 	parser.add_argument('-f', '--search-file', help = 'Path to a file containing search strings line by line', required = False)
 	parser.add_argument('-o', '--output', help = 'Output directory', required = False)
-	parser.add_argument('-e', '--ext', help = 'File Extentions', required = False)
+	#parser.add_argument('-e', '--ext', help = 'File Extentions', required = False)
 	parser.add_argument('--filter', help = 'Enable adult filter', action = 'store_true', required = False)
 	parser.add_argument('--no-filter', help=  'Disable adult filter', action = 'store_true', required = False)
 	args = parser.parse_args()
@@ -151,8 +164,8 @@ if __name__ == "__main__":
 		adlt = 'off'
 	elif args.filter:
 		adlt = ''
-	if args.ext:
-		print args.ext
+	#if args.ext:
+	#	print args.ext
 	if args.search_string:
 		keyword = args.search_string
 		fetch_images_from_keyword(args.search_string,output_dir)

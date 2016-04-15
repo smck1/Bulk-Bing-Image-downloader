@@ -1,5 +1,13 @@
 #output
 bing
+images
+
+#query file
+query.txt
+
+#python
+
+*.pyc
 
 # Logs
 logs
