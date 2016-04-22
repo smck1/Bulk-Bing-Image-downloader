@@ -38,15 +38,15 @@ def download(url,output_dir,retry=False):
 	if config:
 		if config.domainlimit:
 			count = domainhits.get(domain)
-			if count and count >=config.domainlimit:
+			if count and count >config.domainlimit:
 				#print("Domain limit reached " + domain)
-				failed_urls.append((url, output_dir))
+				#failed_urls.append((url, output_dir))
 				#logging.warning('"Domain limit reached: {}'.format(domain))
 				return -1
 		if config.extensions:
 			ext = os.path.splitext(path)[1].lower()
 			if ext not in config.extensions:
-				failed_urls.append((url, output_dir))
+				#failed_urls.append((url, output_dir))
 				#print 'Ignored file: {}'.format(ext)
 				return -1
 	filename = posixpath.basename(path)
@@ -54,7 +54,7 @@ def download(url,output_dir,retry=False):
 	if len(filename)>40:
 		filename=filename[:36]+filename[-4:]
 	while os.path.exists(output_dir + '/' + filename):
-		filename = str(random.randint(0,100)) + filename
+		filename = str(random.randint(0,1000)) + filename
 	in_progress.append(filename)
 	try:
 		#request=urllib.request.Request(url,None,urlopenheader)
@@ -75,6 +75,7 @@ def download(url,output_dir,retry=False):
 		tried_urls.append(url_hash)
 	except Exception as e:
 		print e
+		domainhits[domain] = domainhits.get(domain, 0) - 1 #Failure, decrement domain hits
 		if retry:
 			print('Retry Fail ' + filename)
 			logging.info('Retry Failed: {}'.format(url))
@@ -82,8 +83,7 @@ def download(url,output_dir,retry=False):
 			print("FAIL " + filename)
 			logging.warning('Failed: {}'.format(url))
 			failed_urls.append((url, output_dir))
-	logging.warning('Success: {}'.format(url))
-	domainhits[domain] = domainhits.get(domain, 0) + 1
+	logging.warning('Success: {} - {}'.format(url, filename))
 	pool_sema.release()
 
 def removeNotFinished():
@@ -109,6 +109,8 @@ def fetch_images_from_keyword(keyword,output_dir):
 			last = links[-1]
 			current += bingcount
 			for link in links:
+				domain = urlbits = urlparse.urlparse(link).netloc
+				domainhits[domain] = domainhits.get(domain, 0) + 1 # Add domain hit here to avoid race condition
 				t = threading.Thread(target = download,args = (link,output_dir))
 				#t.daemon = True
 				t.start()
@@ -153,6 +155,7 @@ if __name__ == "__main__":
 		download_history=open(output_dir + '/download_history.pickle','rb')
 		tried_urls=pickle.load(download_history)
 		finished_keywords=pickle.load(download_history)
+		domainhits=pickle.load(download_history)
 		download_history.close()
 	except (OSError, IOError):
 		tried_urls=[]
