@@ -11,10 +11,11 @@ output_dir = './bing' #default output dir
 adult_filter = True #Do not disable adult filter by default
 pool_sema = threading.BoundedSemaphore(value = 20) #max number of download threads
 bingcount = 35 #default bing paging
-socket.setdefaulttimeout(2)
+socket.setdefaulttimeout(3)
 
 in_progress = []
 tried_urls = []
+skip_urls = []
 finished_keywords = []
 failed_urls = []
 domainhits = {}
@@ -26,9 +27,11 @@ logging.basicConfig(level=logging.WARNING, format=FORMAT)
 
 
 def download(url,output_dir,retry=False):
-	global tried_urls, failed_urls, successful_urls
+	global tried_urls, failed_urls, successful_urls, skip_urls
 	url_hash=hashlib.sha224(url.encode('utf-8')).digest()
 	if url_hash in tried_urls:
+		return
+	elif url_hash in skip_urls:
 		return
 	urlbits = urlparse.urlparse(url)
 	path = urlbits.path
@@ -42,12 +45,14 @@ def download(url,output_dir,retry=False):
 				#print("Domain limit reached " + domain)
 				#failed_urls.append((url, output_dir))
 				#logging.warning('"Domain limit reached: {}'.format(domain))
+				skip_urls.append(url_hash)
 				return -1
 		if config.extensions:
 			ext = os.path.splitext(path)[1].lower()
 			if ext not in config.extensions:
 				#failed_urls.append((url, output_dir))
 				#print 'Ignored file: {}'.format(ext)
+				skip_urls.append(url_hash)
 				return -1
 	filename = posixpath.basename(path)
 	pool_sema.acquire()
@@ -59,7 +64,7 @@ def download(url,output_dir,retry=False):
 	try:
 		#request=urllib.request.Request(url,None,urlopenheader)
 		#image=urllib.request.urlopen(request).read()
-		response = requests.get(url, headers=urlopenheader, timeout=5)
+		response = requests.get(url, headers=urlopenheader, timeout=10)
 		if response.status_code == 200:
 			fpath = output_dir + '/' + filename
 			with open(fpath, 'wb+') as f:
@@ -83,7 +88,9 @@ def download(url,output_dir,retry=False):
 			print("FAIL " + filename)
 			logging.warning('Failed: {}'.format(url))
 			failed_urls.append((url, output_dir))
-	logging.warning('Success: {} - {}'.format(url, filename))
+		pool_sema.release()
+		return
+	logging.warning('Success: {} - {}'.format(url, output_dir + '/' + filename))
 	pool_sema.release()
 
 def removeNotFinished():
@@ -123,6 +130,7 @@ def fetch_images_from_keyword(keyword,output_dir):
 def backup_history(*args):
 	download_history=open(output_dir + '/download_history.pickle','wb')
 	pickle.dump(tried_urls,download_history)
+	pickle.dump(skip_urls,download_history)
 	pickle.dump(finished_keywords, download_history)
 	pickle.dump(domainhits, download_history)
 	download_history.close()
@@ -154,6 +162,7 @@ if __name__ == "__main__":
 	try:
 		download_history=open(output_dir + '/download_history.pickle','rb')
 		tried_urls=pickle.load(download_history)
+		skip_urls=pickle.load(download_history)
 		finished_keywords=pickle.load(download_history)
 		domainhits=pickle.load(download_history)
 		download_history.close()
